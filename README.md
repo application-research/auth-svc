@@ -1,1 +1,1 @@
-# estuary-auth-svc
+# auth-svc
