@@ -1,14 +1,17 @@
 package main
 
 import (
+	httpServer "github.com/go-micro/plugins/v4/server/http"
+	"github.com/spf13/viper"
+	"go-micro.dev/v4"
 	"go-micro.dev/v4/registry"
 	"go-micro.dev/v4/server"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 	"log"
-	"net/http"
+	"time"
 
-	httpServer "github.com/go-micro/plugins/v4/server/http"
-	"go-micro.dev/v4"
-
+	"auth-svc/api"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
@@ -34,8 +37,9 @@ func main() {
 	e.Use(middleware.Recover())
 	e.Use(middleware.CORS())
 
-	authService := newAuthService()
-	authService.InitRouter(e)
+	db := initDB()
+	api.NewApiService(db)
+	api.InitRouter(e)
 
 	hd := srv.NewHandler(e)
 	if err := srv.Handle(hd); err != nil {
@@ -50,26 +54,33 @@ func main() {
 	service.Run()
 }
 
-type authService struct{}
+func initDB() *gorm.DB {
+	viper.SetConfigFile(".env")
+	err := viper.ReadInConfig()
 
-func newAuthService() *authService {
-	return &authService{}
-}
+	dbHost, okHost := viper.Get("DB_HOST").(string)
+	dbUser, okUser := viper.Get("DB_USER").(string)
+	dbPass, okPass := viper.Get("DB_PASS").(string)
+	dbName, okName := viper.Get("DB_NAME").(string)
+	dbPort, okPort := viper.Get("DB_PORT").(string)
+	if !okHost || !okUser || !okPass || !okName || !okPort {
+		panic("invalid database configuration")
+	}
 
-func (a *authService) InitRouter(e *echo.Echo) {
-	e.POST("/check-api-key", a.BasicUserApiCheckHandler)
-	e.POST("/check-user-api-key", a.BasicApiUserCheckHandler)
-	e.POST("/check-user-pass", a.BasicUserPassHandler)
-}
+	dsn := "host=" + dbHost + " user=" + dbUser + " password=" + dbPass + " dbname=" + dbName + " port=" + dbPort + " sslmode=disable TimeZone=Asia/Shanghai"
 
-func (a *authService) BasicUserApiCheckHandler(c echo.Context) error {
-	return c.NoContent(http.StatusOK)
-}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	sqldb, err := db.DB()
+	if err != nil {
+		panic(err)
+	}
+	sqldb.SetMaxIdleConns(80)
+	sqldb.SetMaxOpenConns(250)
+	sqldb.SetConnMaxIdleTime(time.Hour)
+	sqldb.SetConnMaxLifetime(time.Second * 60)
+	if err != nil {
+		panic("failed to connect database")
+	}
 
-func (a *authService) BasicApiUserCheckHandler(c echo.Context) error {
-	return c.NoContent(http.StatusOK)
-}
-
-func (a *authService) BasicUserPassHandler(c echo.Context) error {
-	return c.NoContent(http.StatusOK)
+	return db
 }
