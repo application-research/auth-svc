@@ -400,12 +400,12 @@ type MetamaskLoginResult struct {
 const TokenExpiryDurationLogin = time.Hour * 24 * 30 // 30 days
 
 func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLoginResult, error) {
-	var metamaskLoginResult MetamaskLoginResult
+	var result MetamaskLoginResult
 	var user User
 
 	if err := s.DB.First(&user, "username = ?", strings.ToLower(params.Address)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return metamaskLoginResult, &HttpError{
+			return result, &HttpError{
 				Code:    http.StatusForbidden,
 				Reason:  ERR_USER_NOT_FOUND,
 				Details: "no such user exist",
@@ -414,16 +414,21 @@ func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLo
 	}
 
 	if !verifySignature(params.Signature, user.NonceMessage, params.Address) {
-		return metamaskLoginResult, &HttpError{
+		return result, &HttpError{
 			Code:    http.StatusForbidden,
 			Reason:  ERR_INVALID_AUTH,
 			Details: "signature verification failed",
 		}
 	}
 
+	user.NonceMessage = ""
+	if err := s.DB.Save(&user).Error; err != nil {
+		return result, err
+	}
+
 	authToken, err := s.newAuthTokenForUser(&user, time.Now().Add(TokenExpiryDurationLogin), nil, "on-login", true)
 	if err != nil {
-		return metamaskLoginResult, err
+		return result, err
 	}
 
 	return MetamaskLoginResult{
