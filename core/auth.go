@@ -3,6 +3,10 @@ package core
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -10,6 +14,7 @@ import (
 	"golang.org/x/xerrors"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -29,9 +34,12 @@ type Authorization struct {
 type AuthToken struct {
 	gorm.Model
 	Token      string `gorm:"unique"`
+	TokenHash  string `gorm:"unique"`
+	Label      string
 	User       uint
 	UploadOnly bool
 	Expiry     time.Time
+	IsSession  bool
 }
 
 type User struct {
@@ -49,6 +57,7 @@ type User struct {
 	Flags     int
 
 	StorageDisabled bool
+	NonceMessage    string
 }
 
 // Initialize
@@ -323,4 +332,159 @@ func (s Authorization) AuthenticateUserPassword(param AuthenticationParam) Authe
 		},
 	}
 
+}
+
+type NonceParams struct {
+	Address  string `json:"address"`
+	Host     string `json:"host"`
+	IssuedAt string `json:"issuedAt"`
+	ChainId  int    `json:"chainId"`
+	Version  string `json:"version"`
+}
+
+type NonceResult struct {
+	NonceMsg string
+}
+
+func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
+	var nonceResult NonceResult
+	var user User
+
+	if err := s.DB.First(&user, "username = ?", strings.ToLower(param.Address)).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nonceResult, &HttpError{
+				Code:    http.StatusBadRequest,
+				Reason:  ERR_USER_NOT_FOUND,
+				Details: "no such user exist",
+			}
+		}
+		return nonceResult, err
+	}
+
+	if user.NonceMessage != "" {
+		return NonceResult{
+			NonceMsg: user.NonceMessage,
+		}, nil
+	}
+
+	msg := "%s wants you to sign in with your Filecoin account:\n%s\n\nURI: https://%s\nVersion: %s\nChain ID: %d\nNonce: %s\nIssued At: %s;"
+	nonce := randomNonce(16)
+	user.NonceMessage = fmt.Sprintf(msg, param.Host, user.Username, param.Host, param.Version, param.ChainId, nonce, param.IssuedAt)
+
+	if err := s.DB.Save(&user).Error; err != nil {
+		return nonceResult, err
+	}
+
+	return NonceResult{
+		NonceMsg: user.NonceMessage,
+	}, nil
+}
+
+type MetamaskLoginParams struct {
+	Address   string `json:"address"`
+	Signature string `json:"signature"`
+}
+
+type MetamaskLoginResult struct {
+	Token  string    `json:"token"`
+	Expiry time.Time `json:"expiry"`
+}
+
+const TokenExpiryDurationLogin = time.Hour * 24 * 30 // 30 days
+
+func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLoginResult, error) {
+	var metamaskLoginResult MetamaskLoginResult
+	var user User
+
+	if err := s.DB.First(&user, "username = ?", strings.ToLower(params.Address)).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return metamaskLoginResult, &HttpError{
+				Code:    http.StatusForbidden,
+				Reason:  ERR_USER_NOT_FOUND,
+				Details: "no such user exist",
+			}
+		}
+	}
+
+	if !verifySignature(params.Signature, user.NonceMessage, params.Address) {
+		return metamaskLoginResult, &HttpError{
+			Code:    http.StatusForbidden,
+			Reason:  ERR_INVALID_AUTH,
+			Details: "signature verification failed",
+		}
+	}
+
+	authToken, err := s.newAuthTokenForUser(&user, time.Now().Add(TokenExpiryDurationLogin), nil, "on-login", true)
+	if err != nil {
+		return metamaskLoginResult, err
+	}
+
+	return MetamaskLoginResult{
+		Token:  authToken.Token,
+		Expiry: authToken.Expiry,
+	}, nil
+}
+
+func randomNonce(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
+func verifySignature(sign string, msg string, address string) bool {
+	sig := hexutil.MustDecode(sign)
+	if sig[crypto.RecoveryIDOffset] == 27 || sig[crypto.RecoveryIDOffset] == 28 {
+		sig[crypto.RecoveryIDOffset] -= 27 // Transform yellow paper V from 27/28 to 0/1
+	}
+	msgBytes := accounts.TextHash([]byte(msg))
+	recovered, err := crypto.SigToPub(msgBytes, sig)
+	if err != nil {
+		return false
+	}
+
+	recoveredAddr := crypto.PubkeyToAddress(*recovered)
+
+	if address != strings.ToLower(recoveredAddr.Hex()) {
+		return false
+	}
+
+	return true
+}
+
+func (s Authorization) newAuthTokenForUser(user *User, expiry time.Time, perms []string, label string, isSession bool) (*AuthToken, error) {
+	if len(perms) > 1 {
+		return nil, fmt.Errorf("invalid perms")
+	}
+
+	var uploadOnly bool
+	if len(perms) == 1 {
+		switch perms[0] {
+		case "all":
+			uploadOnly = false
+		case "upload":
+			uploadOnly = true
+		default:
+			return nil, fmt.Errorf("invalid perm: %q", perms[0])
+		}
+	}
+
+	token := "EST" + uuid.New().String() + "ARY"
+	authToken := &AuthToken{
+		Token:      token,
+		TokenHash:  GetTokenHash(token),
+		Label:      label,
+		User:       user.ID,
+		Expiry:     expiry,
+		UploadOnly: uploadOnly,
+		IsSession:  isSession,
+	}
+	if err := s.DB.Create(authToken).Error; err != nil {
+		return nil, err
+	}
+
+	return authToken, nil
 }
