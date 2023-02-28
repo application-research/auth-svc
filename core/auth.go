@@ -60,6 +60,13 @@ type User struct {
 	NonceMessage    string
 }
 
+type InviteCode struct {
+	gorm.Model
+	Code      string `gorm:"unique"`
+	CreatedBy uint
+	ClaimedBy uint
+}
+
 // Initialize
 func Init() *AuthorizationServer {
 	return &AuthorizationServer{} // create the authorization server
@@ -422,6 +429,78 @@ func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLo
 	return MetamaskLoginResult{
 		Token:  authToken.Token,
 		Expiry: authToken.Expiry,
+	}, nil
+}
+
+type RegisterWithMetamaskParams struct {
+	InviteCode string `json:"inviteCode"`
+	Address    string `json:"address"`
+}
+
+type RegisterWithMetamaskResult struct {
+	Success bool `json:"success"`
+}
+
+func (s Authorization) RegisterWithMetamask(params RegisterWithMetamaskParams) (RegisterWithMetamaskResult, error) {
+	var result RegisterWithMetamaskResult
+	var invite InviteCode
+
+	if err := s.DB.First(&invite, "code = ?", params.InviteCode).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return result, &HttpError{
+				Code:    http.StatusNotFound,
+				Reason:  ERR_INVALID_INVITE,
+				Details: "no such invite code was found",
+			}
+		}
+	}
+
+	if invite.ClaimedBy != 0 {
+		return result, &HttpError{
+			Code:    http.StatusBadRequest,
+			Reason:  ERR_INVITE_ALREADY_USED,
+			Details: "the invite code as already been claimed",
+		}
+	}
+
+	username := strings.ToLower(params.Address)
+
+	var exist *User
+	if err := s.DB.First(&exist, "username = ?", username).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return result, err
+		}
+		exist = nil
+	}
+
+	if exist != nil {
+		return result, &HttpError{
+			Code:    http.StatusBadRequest,
+			Reason:  ERR_USERNAME_TAKEN,
+			Details: "username already exist",
+		}
+	}
+
+	newUser := &User{
+		Username: username,
+		UUID:     uuid.New().String(),
+		Perm:     PermLevelUser,
+	}
+
+	if err := s.DB.Create(newUser).Error; err != nil {
+		return result, &HttpError{
+			Code:   http.StatusInternalServerError,
+			Reason: ERR_USER_CREATION_FAILED,
+		}
+	}
+
+	invite.ClaimedBy = newUser.ID
+	if err := s.DB.Save(&invite).Error; err != nil {
+		return result, err
+	}
+
+	return RegisterWithMetamaskResult{
+		Success: true,
 	}, nil
 }
 

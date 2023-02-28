@@ -3,6 +3,7 @@ module auth-svc
 go 1.18
 
 require (
+	github.com/ethereum/go-ethereum v1.11.2
 	github.com/go-micro/plugins/v4/server/http v1.2.1
 	github.com/labstack/echo/v4 v4.10.2
 	github.com/spf13/viper v1.15.0
@@ -11,10 +12,13 @@ require (
 	go.opentelemetry.io/otel/trace v1.13.0
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2
 	gorm.io/driver/postgres v1.4.8
+	gorm.io/driver/sqlite v1.4.4
 	gorm.io/gorm v1.24.5
 )
 
 require (
+	github.com/btcsuite/btcd/btcec/v2 v2.2.0 // indirect
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
@@ -26,6 +30,7 @@ require (
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.17 // indirect
+	github.com/mattn/go-sqlite3 v1.14.15 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.6 // indirect
 	github.com/spf13/afero v1.9.3 // indirect

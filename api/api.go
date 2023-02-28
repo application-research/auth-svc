@@ -70,8 +70,24 @@ func LoginWithMetamaskHandler(c echo.Context) error {
 }
 
 func RegisterWithMetamaskHandler(c echo.Context) error {
-	var result core.MetamaskLoginResult
+	var params core.RegisterWithMetamaskParams
 
+	if err := c.Bind(&params); err != nil {
+		return err
+	}
+
+	if params.Address == "" || params.InviteCode == "" {
+		return &core.HttpError{
+			Code:    http.StatusUnprocessableEntity,
+			Reason:  core.ERR_CONTENT_NOT_FOUND,
+			Details: fmt.Sprintf("address and invite code paramater is required"),
+		}
+	}
+
+	result, err := auth.RegisterWithMetamask(params)
+	if err != nil {
+		return err
+	}
 	return c.JSON(http.StatusOK, result)
 }
 
