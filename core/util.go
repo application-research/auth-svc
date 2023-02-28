@@ -3,11 +3,16 @@ package core
 import (
 	"crypto/sha256"
 	b64 "encoding/base64"
+	"github.com/ethereum/go-ethereum/accounts"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"math/rand"
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -135,4 +140,34 @@ func GetTokenHash(token string) string {
 	tokenHashBytes := sha256.Sum256([]byte(token))
 	// needs to be URL-encodable to send revoke token requests by hash
 	return b64.RawURLEncoding.EncodeToString(tokenHashBytes[:])
+}
+
+func RandomNonce(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[seededRand.Intn(len(charset))]
+	}
+	return string(b)
+}
+
+func VerifySignature(sign string, msg string, address string) bool {
+	sig := hexutil.MustDecode(sign)
+	if sig[crypto.RecoveryIDOffset] == 27 || sig[crypto.RecoveryIDOffset] == 28 {
+		sig[crypto.RecoveryIDOffset] -= 27 // Transform yellow paper V from 27/28 to 0/1
+	}
+	msgBytes := accounts.TextHash([]byte(msg))
+	recovered, err := crypto.SigToPub(msgBytes, sig)
+	if err != nil {
+		return false
+	}
+
+	recoveredAddr := crypto.PubkeyToAddress(*recovered)
+
+	if address != strings.ToLower(recoveredAddr.Hex()) {
+		return false
+	}
+
+	return true
 }

@@ -3,9 +3,6 @@ package core
 import (
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"go.opentelemetry.io/otel/attribute"
@@ -14,7 +11,6 @@ import (
 	"golang.org/x/xerrors"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -375,7 +371,7 @@ func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	}
 
 	msg := "%s wants you to sign in with your Filecoin account:\n%s\n\nURI: https://%s\nVersion: %s\nChain ID: %d\nNonce: %s\nIssued At: %s;"
-	nonce := randomNonce(16)
+	nonce := RandomNonce(16)
 	user.NonceMessage = fmt.Sprintf(msg, param.Host, user.Username, param.Host, param.Version, param.ChainId, nonce, param.IssuedAt)
 
 	if err := s.DB.Save(&user).Error; err != nil {
@@ -413,7 +409,7 @@ func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLo
 		}
 	}
 
-	if !verifySignature(params.Signature, user.NonceMessage, params.Address) {
+	if !VerifySignature(params.Signature, user.NonceMessage, params.Address) {
 		return result, &HttpError{
 			Code:    http.StatusForbidden,
 			Reason:  ERR_INVALID_AUTH,
@@ -507,36 +503,6 @@ func (s Authorization) RegisterWithMetamask(params RegisterWithMetamaskParams) (
 	return RegisterWithMetamaskResult{
 		Success: true,
 	}, nil
-}
-
-func randomNonce(length int) string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	seededRand := rand.New(rand.NewSource(time.Now().UnixNano()))
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[seededRand.Intn(len(charset))]
-	}
-	return string(b)
-}
-
-func verifySignature(sign string, msg string, address string) bool {
-	sig := hexutil.MustDecode(sign)
-	if sig[crypto.RecoveryIDOffset] == 27 || sig[crypto.RecoveryIDOffset] == 28 {
-		sig[crypto.RecoveryIDOffset] -= 27 // Transform yellow paper V from 27/28 to 0/1
-	}
-	msgBytes := accounts.TextHash([]byte(msg))
-	recovered, err := crypto.SigToPub(msgBytes, sig)
-	if err != nil {
-		return false
-	}
-
-	recoveredAddr := crypto.PubkeyToAddress(*recovered)
-
-	if address != strings.ToLower(recoveredAddr.Hex()) {
-		return false
-	}
-
-	return true
 }
 
 func (s Authorization) newAuthTokenForUser(user *User, expiry time.Time, perms []string, label string, isSession bool) (*AuthToken, error) {
