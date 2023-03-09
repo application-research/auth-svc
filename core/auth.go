@@ -56,6 +56,12 @@ type User struct {
 	NonceMessage    string
 }
 
+type Nonce struct {
+	gorm.Model
+	Address string `gorm:"unique"`
+	Message string
+}
+
 type InviteCode struct {
 	gorm.Model
 	Code      string `gorm:"unique"`
@@ -346,12 +352,15 @@ type NonceParams struct {
 }
 
 type NonceResult struct {
-	NonceMsg string
+	NonceMsg string `json:"nonceMsg"`
 }
+
+const NonceExpiryDuration = time.Hour * 1 // 1 hour
 
 func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	var nonceResult NonceResult
 	var user User
+	var nonce Nonce
 
 	if err := s.DB.First(&user, "username = ?", strings.ToLower(param.Address)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -364,23 +373,45 @@ func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 		return nonceResult, err
 	}
 
-	if user.NonceMessage != "" {
+	if err := s.DB.First(&nonce, "address = ?", strings.ToLower(param.Address)).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Nonce not found, generate a new one
+			nonce = generateNewNonce(user, param)
+			if errSave := s.DB.Save(&nonce).Error; errSave != nil {
+				return nonceResult, errSave
+			}
+			return NonceResult{
+				NonceMsg: nonce.Message,
+			}, nil
+		}
+		return nonceResult, err
+	}
+
+	// If the nonce is not expired, return it.
+	if !nonce.UpdatedAt.Add(NonceExpiryDuration).Before(time.Now()) {
 		return NonceResult{
-			NonceMsg: user.NonceMessage,
+			NonceMsg: nonce.Message,
 		}, nil
 	}
 
-	msg := "%s wants you to sign in with your Filecoin account:\n%s\n\nURI: https://%s\nVersion: %s\nChain ID: %d\nNonce: %s\nIssued At: %s;"
-	nonce := RandomNonce(16)
-	user.NonceMessage = fmt.Sprintf(msg, param.Host, user.Username, param.Host, param.Version, param.ChainId, nonce, param.IssuedAt)
-
-	if err := s.DB.Save(&user).Error; err != nil {
+	// Nonce found but expired, generate a new one.
+	nonce = generateNewNonce(user, param)
+	if err := s.DB.Save(&nonce).Error; err != nil {
 		return nonceResult, err
 	}
 
 	return NonceResult{
-		NonceMsg: user.NonceMessage,
+		NonceMsg: nonce.Message,
 	}, nil
+}
+
+func generateNewNonce(user User, param NonceParams) Nonce {
+	var nonce Nonce
+	msg := "%s wants you to sign in with your Filecoin account:\n%s\n\nURI: https://%s\nVersion: %s\nChain ID: %d\nNonce: %s\nIssued At: %s;"
+	generatedNonce := RandomNonce(16)
+	nonce.Address = user.Username
+	nonce.Message = fmt.Sprintf(msg, param.Host, user.Username, param.Host, param.Version, param.ChainId, generatedNonce, param.IssuedAt)
+	return nonce
 }
 
 type MetamaskLoginParams struct {
@@ -397,6 +428,7 @@ const TokenExpiryDurationLogin = time.Hour * 24 * 30 // 30 days
 
 func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLoginResult, error) {
 	var result MetamaskLoginResult
+	var nonce Nonce
 	var user User
 
 	if err := s.DB.First(&user, "username = ?", strings.ToLower(params.Address)).Error; err != nil {
@@ -409,17 +441,22 @@ func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLo
 		}
 	}
 
-	if !VerifySignature(params.Signature, user.NonceMessage, params.Address) {
+	if err := s.DB.First(&nonce, "address = ?", strings.ToLower(params.Address)).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return result, &HttpError{
+				Code:    http.StatusForbidden,
+				Reason:  ERR_USER_NOT_FOUND,
+				Details: "no nonce messasge found, please generate nonce first.",
+			}
+		}
+	}
+
+	if !VerifySignature(params.Signature, nonce.Message, params.Address) {
 		return result, &HttpError{
 			Code:    http.StatusForbidden,
 			Reason:  ERR_INVALID_AUTH,
 			Details: "signature verification failed",
 		}
-	}
-
-	user.NonceMessage = ""
-	if err := s.DB.Save(&user).Error; err != nil {
-		return result, err
 	}
 
 	authToken, err := s.newAuthTokenForUser(&user, time.Now().Add(TokenExpiryDurationLogin), nil, "on-login", true)
