@@ -53,7 +53,6 @@ type User struct {
 	Flags     int
 
 	StorageDisabled bool
-	NonceMessage    string
 }
 
 type Nonce struct {
@@ -376,7 +375,8 @@ func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	if err := s.DB.First(&nonce, "address = ?", strings.ToLower(param.Address)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// Nonce not found, generate a new one
-			nonce = generateNewNonce(user, param)
+			nonce.Address = user.Username
+			nonce.Message = generateNewNonce(user, param)
 			if errSave := s.DB.Save(&nonce).Error; errSave != nil {
 				return nonceResult, errSave
 			}
@@ -395,7 +395,7 @@ func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	}
 
 	// Nonce found but expired, generate a new one.
-	nonce = generateNewNonce(user, param)
+	nonce.Message = generateNewNonce(user, param)
 	if err := s.DB.Save(&nonce).Error; err != nil {
 		return nonceResult, err
 	}
@@ -405,13 +405,10 @@ func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	}, nil
 }
 
-func generateNewNonce(user User, param NonceParams) Nonce {
-	var nonce Nonce
-	msg := "%s wants you to sign in with your Filecoin account:\n%s\n\nURI: https://%s\nVersion: %s\nChain ID: %d\nNonce: %s\nIssued At: %s;"
+func generateNewNonce(user User, param NonceParams) string {
+	msg := "%s wants you to sign in with your Filecoin account:\n%s\n\nURI: %s\nVersion: %s\nChain ID: %d\nNonce: %s\nIssued At: %s;"
 	generatedNonce := RandomNonce(16)
-	nonce.Address = user.Username
-	nonce.Message = fmt.Sprintf(msg, param.Host, user.Username, param.Host, param.Version, param.ChainId, generatedNonce, param.IssuedAt)
-	return nonce
+	return fmt.Sprintf(msg, param.Host, user.Username, param.Host, param.Version, param.ChainId, generatedNonce, param.IssuedAt)
 }
 
 type MetamaskLoginParams struct {
