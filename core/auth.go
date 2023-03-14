@@ -449,7 +449,7 @@ func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLo
 	}
 
 	// If the nonce is not expired, return it.
-	if !nonce.UpdatedAt.Add(NonceExpiryDuration).Before(time.Now()) {
+	if nonce.UpdatedAt.Add(NonceExpiryDuration).Before(time.Now()) {
 		return result, &HttpError{
 			Code:    http.StatusForbidden,
 			Reason:  ERR_INVALID_AUTH,
