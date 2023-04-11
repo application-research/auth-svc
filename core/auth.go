@@ -361,7 +361,7 @@ func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	var user User
 	var nonce Nonce
 
-	if err := s.DB.First(&user, "username = ?", strings.ToLower(param.Address)).Error; err != nil {
+	if err := s.DB.First(&user, "auth_address = ?", strings.ToLower(param.Address)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nonceResult, &HttpError{
 				Code:    http.StatusBadRequest,
@@ -428,7 +428,7 @@ func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLo
 	var nonce Nonce
 	var user User
 
-	if err := s.DB.First(&user, "username = ?", strings.ToLower(params.Address)).Error; err != nil {
+	if err := s.DB.First(&user, "auth_address = ?", strings.ToLower(params.Address)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return result, &HttpError{
 				Code:    http.StatusForbidden,
