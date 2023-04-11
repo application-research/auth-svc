@@ -53,6 +53,7 @@ type User struct {
 	Flags     int
 
 	StorageDisabled bool
+	AuthAddress     string
 }
 
 type Nonce struct {
@@ -526,9 +527,10 @@ func (s Authorization) RegisterWithMetamask(params RegisterWithMetamaskParams) (
 	}
 
 	newUser := &User{
-		Username: username,
-		UUID:     uuid.New().String(),
-		Perm:     PermLevelUser,
+		Username:    username,
+		UUID:        uuid.New().String(),
+		Perm:        PermLevelUser,
+		AuthAddress: username,
 	}
 
 	if err := s.DB.Create(newUser).Error; err != nil {
