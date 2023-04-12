@@ -17,6 +17,12 @@ func NewApiService(db *gorm.DB) {
 	auth = auth.SetDB(db)
 }
 
+const (
+	PermLevelUpload = 1
+	PermLevelUser   = 2
+	PermLevelAdmin  = 10
+)
+
 func InitRouter(e *echo.Echo) {
 	e.POST("/check-api-key", BasicUserApiCheckHandler)
 	e.POST("/check-user-api-key", BasicApiUserCheckHandler)
@@ -25,6 +31,25 @@ func InitRouter(e *echo.Echo) {
 	e.POST("/generate-nonce", GenerateNonceHandler)
 	e.POST("/login-with-metamask", LoginWithMetamaskHandler)
 	e.POST("/register-with-metamask", RegisterWithMetamaskHandler)
+
+	user := e.Group("/user")
+	user.Use(auth.AuthRequired(PermLevelUser))
+	user.POST("/auth-address", withUser(AddAuthAddressHandler))
+	user.DELETE("/auth-address", withUser(RemoveAuthAddressHandler))
+}
+
+func withUser(f func(echo.Context, *core.User) error) func(echo.Context) error {
+	return func(c echo.Context) error {
+		u, ok := c.Get("user").(*core.User)
+		if !ok {
+			return &core.HttpError{
+				Code:    http.StatusUnauthorized,
+				Reason:  core.ERR_INVALID_AUTH,
+				Details: "endpoint not called with proper authentication",
+			}
+		}
+		return f(c, u)
+	}
 }
 
 func GenerateNonceHandler(c echo.Context) error {
@@ -65,6 +90,50 @@ func LoginWithMetamaskHandler(c echo.Context) error {
 	result, err := auth.LoginWithMetamask(params)
 	if err != nil {
 		return err
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func AddAuthAddressHandler(c echo.Context, u *core.User) error {
+	var params core.AuthAddressParams
+
+	if err := c.Bind(&params); err != nil {
+		return err
+	}
+
+	if params.Address == "" {
+		return &core.HttpError{
+			Code:    http.StatusUnprocessableEntity,
+			Reason:  core.ERR_CONTENT_NOT_FOUND,
+			Details: fmt.Sprintf("address paramater is required"),
+		}
+	}
+
+	result, err := auth.AddAuthAddress(params, u)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func RemoveAuthAddressHandler(c echo.Context, u *core.User) error {
+	var params core.AuthAddressParams
+
+	if err := c.Bind(&params); err != nil {
+		return err
+	}
+
+	if params.Address == "" {
+		return &core.HttpError{
+			Code:    http.StatusUnprocessableEntity,
+			Reason:  core.ERR_CONTENT_NOT_FOUND,
+			Details: fmt.Sprintf("address paramater is required"),
+		}
+	}
+
+	result, err := auth.RemoveAuthAddress(params, u)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, err)
 	}
 	return c.JSON(http.StatusOK, result)
 }

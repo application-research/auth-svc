@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/xerrors"
@@ -161,16 +160,16 @@ func (s Authorization) AuthRequired(level int) echo.MiddlewareFunc {
 				return err
 			}
 
-			ctx, span := s.tracer.Start(c.Request().Context(), "authCheck")
-			defer span.End()
-			c.SetRequest(c.Request().WithContext(ctx))
+			//ctx := c.Request().Context()
+			//ctx, span := s.tracer.Start(context, "authCheck")
+			//c.SetRequest(c.Request().WithContext(ctx))
 
 			u, err := s.CheckAuthorizationToken(auth)
 			if err != nil {
 				return err
 			}
 
-			span.SetAttributes(attribute.Int("user", int(u.ID)))
+			//span.SetAttributes(attribute.Int("user", int(u.ID)))
 
 			if u.AuthToken.UploadOnly && level >= PermLevelUser {
 				return &HttpError{
@@ -582,4 +581,78 @@ func (s Authorization) newAuthTokenForUser(user *User, expiry time.Time, perms [
 	}
 
 	return authToken, nil
+}
+
+type AuthAddressParams struct {
+	Address string `json:"address"`
+}
+
+type AuthAddressResult struct {
+	Success bool `json:"success"`
+}
+
+type AuthAddress struct {
+	gorm.Model
+	Address string `gorm:"unique"`
+	UserId  uint
+}
+
+func (s Authorization) AddAuthAddress(params AuthAddressParams, u *User) (AuthAddressResult, error) {
+	var result AuthAddressResult
+	var authAddress AuthAddress
+
+	if err := s.DB.First(&authAddress, "address = ?", params.Address).Error; err == nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return result, &HttpError{
+				Code:    http.StatusNotFound,
+				Reason:  ERR_INVALID_INVITE,
+				Details: "Address is already linked to a user",
+			}
+		}
+	}
+
+	authAddress.Address = params.Address
+	authAddress.UserId = u.ID
+
+	if err := s.DB.Create(&authAddress).Error; err != nil {
+		return result, &HttpError{
+			Code:    http.StatusNotFound,
+			Reason:  ERR_INVALID_INVITE,
+			Details: "Error adding address",
+		}
+	}
+
+	return AuthAddressResult{
+		Success: true,
+	}, nil
+}
+
+func (s Authorization) RemoveAuthAddress(params AuthAddressParams, u *User) (AuthAddressResult, error) {
+	var result AuthAddressResult
+	var authAddress AuthAddress
+
+	if err := s.DB.First(&authAddress, "address = ?", params.Address).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return result, &HttpError{
+				Code:    http.StatusNotFound,
+				Reason:  ERR_INVALID_INVITE,
+				Details: "Address not found",
+			}
+		}
+	}
+
+	authAddress.Address = params.Address
+	authAddress.UserId = u.ID
+
+	if err := s.DB.Delete(&authAddress).Error; err != nil {
+		return result, &HttpError{
+			Code:    http.StatusBadRequest,
+			Reason:  ERR_AUTH_MISSING,
+			Details: "Error removing address",
+		}
+	}
+
+	return AuthAddressResult{
+		Success: true,
+	}, nil
 }
