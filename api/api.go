@@ -36,6 +36,7 @@ func InitRouter(e *echo.Echo) {
 	user.Use(auth.AuthRequired(PermLevelUser))
 	user.POST("/auth-address", withUser(AddAuthAddressHandler))
 	user.DELETE("/auth-address", withUser(RemoveAuthAddressHandler))
+	user.GET("/auth-address", withUser(GetAuthAddressHandler))
 }
 
 func withUser(f func(echo.Context, *core.User) error) func(echo.Context) error {
@@ -132,6 +133,14 @@ func RemoveAuthAddressHandler(c echo.Context, u *core.User) error {
 	}
 
 	result, err := auth.RemoveAuthAddress(params, u)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func GetAuthAddressHandler(c echo.Context, u *core.User) error {
+	result, err := auth.GetAuthAddress(u)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, err)
 	}

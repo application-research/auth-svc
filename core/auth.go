@@ -593,8 +593,8 @@ type AuthAddressResult struct {
 
 type AuthAddress struct {
 	gorm.Model
-	Address string `gorm:"unique"`
-	UserId  uint
+	Address string
+	UserID  uint `gorm:"index"`
 }
 
 func (s Authorization) AddAuthAddress(params AuthAddressParams, u *User) (AuthAddressResult, error) {
@@ -612,13 +612,13 @@ func (s Authorization) AddAuthAddress(params AuthAddressParams, u *User) (AuthAd
 	}
 
 	authAddress.Address = params.Address
-	authAddress.UserId = u.ID
+	authAddress.UserID = u.ID
 
 	if err := s.DB.Create(&authAddress).Error; err != nil {
 		return result, &HttpError{
 			Code:    http.StatusNotFound,
 			Reason:  ERR_INVALID_INVITE,
-			Details: "Error adding address",
+			Details: err.Error(),
 		}
 	}
 
@@ -642,17 +642,29 @@ func (s Authorization) RemoveAuthAddress(params AuthAddressParams, u *User) (Aut
 	}
 
 	authAddress.Address = params.Address
-	authAddress.UserId = u.ID
+	authAddress.UserID = u.ID
 
 	if err := s.DB.Delete(&authAddress).Error; err != nil {
 		return result, &HttpError{
 			Code:    http.StatusBadRequest,
 			Reason:  ERR_AUTH_MISSING,
-			Details: "Error removing address",
+			Details: err.Error(),
 		}
 	}
 
 	return AuthAddressResult{
 		Success: true,
+	}, nil
+}
+
+func (s Authorization) GetAuthAddress(u *User) (AuthAddressParams, error) {
+	var authAddress AuthAddress
+
+	if err := s.DB.First(&authAddress, "user_id = ?", u.ID).Error; err != nil {
+		authAddress.Address = ""
+	}
+
+	return AuthAddressParams{
+		Address: authAddress.Address,
 	}, nil
 }
