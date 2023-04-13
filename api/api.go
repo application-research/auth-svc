@@ -69,7 +69,7 @@ func GenerateNonceHandler(c echo.Context) error {
 
 	result, err := auth.GenerateNonce(nonceParams)
 	if err != nil {
-		return err
+		return c.JSON(http.StatusBadRequest, err)
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -90,7 +90,7 @@ func LoginWithMetamaskHandler(c echo.Context) error {
 
 	result, err := auth.LoginWithMetamask(params)
 	if err != nil {
-		return err
+		return c.JSON(http.StatusBadRequest, err)
 	}
 	return c.JSON(http.StatusOK, result)
 }
@@ -164,7 +164,7 @@ func RegisterWithMetamaskHandler(c echo.Context) error {
 
 	result, err := auth.RegisterWithMetamask(params)
 	if err != nil {
-		return err
+		return c.JSON(http.StatusBadRequest, err)
 	}
 	return c.JSON(http.StatusOK, result)
 }
