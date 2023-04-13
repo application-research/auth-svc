@@ -633,12 +633,10 @@ func (s Authorization) AddAuthAddress(params AuthAddressParams, u *User) (AuthAd
 	var authAddress AuthAddress
 
 	if err := s.DB.First(&authAddress, "address = ?", params.Address).Error; err == nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return result, &HttpError{
-				Code:    http.StatusNotFound,
-				Reason:  ERR_INVALID_REQUEST,
-				Details: "Address is already linked to a user",
-			}
+		return result, &HttpError{
+			Code:    http.StatusNotFound,
+			Reason:  ERR_INVALID_REQUEST,
+			Details: "Address is already linked to a user",
 		}
 	}
 
