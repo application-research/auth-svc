@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/xerrors"
@@ -160,16 +159,16 @@ func (s Authorization) AuthRequired(level int) echo.MiddlewareFunc {
 				return err
 			}
 
-			ctx, span := s.tracer.Start(c.Request().Context(), "authCheck")
-			defer span.End()
-			c.SetRequest(c.Request().WithContext(ctx))
+			//ctx := c.Request().Context()
+			//ctx, span := s.tracer.Start(context, "authCheck")
+			//c.SetRequest(c.Request().WithContext(ctx))
 
 			u, err := s.CheckAuthorizationToken(auth)
 			if err != nil {
 				return err
 			}
 
-			span.SetAttributes(attribute.Int("user", int(u.ID)))
+			//span.SetAttributes(attribute.Int("user", int(u.ID)))
 
 			if u.AuthToken.UploadOnly && level >= PermLevelUser {
 				return &HttpError{
@@ -358,15 +357,15 @@ const NonceExpiryDuration = time.Hour * 1 // 1 hour
 
 func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	var nonceResult NonceResult
-	var user User
 	var nonce Nonce
+	var authAddress AuthAddress
 
-	if err := s.DB.First(&user, "username = ?", strings.ToLower(param.Address)).Error; err != nil {
+	if err := s.DB.First(&authAddress, "address = ?", strings.ToLower(param.Address)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nonceResult, &HttpError{
 				Code:    http.StatusBadRequest,
 				Reason:  ERR_USER_NOT_FOUND,
-				Details: "no such user exist",
+				Details: "No such user exist",
 			}
 		}
 		return nonceResult, err
@@ -375,8 +374,8 @@ func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	if err := s.DB.First(&nonce, "address = ?", strings.ToLower(param.Address)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			// Nonce not found, generate a new one
-			nonce.Address = user.Username
-			nonce.Message = generateNewNonce(user, param)
+			nonce.Address = authAddress.Address
+			nonce.Message = generateNewNonce(authAddress, param)
 			if errSave := s.DB.Save(&nonce).Error; errSave != nil {
 				return nonceResult, errSave
 			}
@@ -395,7 +394,7 @@ func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	}
 
 	// Nonce found but expired, generate a new one.
-	nonce.Message = generateNewNonce(user, param)
+	nonce.Message = generateNewNonce(authAddress, param)
 	if err := s.DB.Save(&nonce).Error; err != nil {
 		return nonceResult, err
 	}
@@ -405,10 +404,10 @@ func (s Authorization) GenerateNonce(param NonceParams) (NonceResult, error) {
 	}, nil
 }
 
-func generateNewNonce(user User, param NonceParams) string {
+func generateNewNonce(auth AuthAddress, param NonceParams) string {
 	msg := "%s wants you to sign in with your Filecoin account:\n%s\n\nURI: %s\nVersion: %s\nChain ID: %d\nNonce: %s\nIssued At: %s;"
 	generatedNonce := RandomNonce(16)
-	return fmt.Sprintf(msg, param.Host, user.Username, param.Host, param.Version, param.ChainId, generatedNonce, param.IssuedAt)
+	return fmt.Sprintf(msg, param.Host, auth.Address, param.Host, param.Version, param.ChainId, generatedNonce, param.IssuedAt)
 }
 
 type MetamaskLoginParams struct {
@@ -427,23 +426,26 @@ func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLo
 	var result MetamaskLoginResult
 	var nonce Nonce
 	var user User
+	var authAddress AuthAddress
 
-	if err := s.DB.First(&user, "username = ?", strings.ToLower(params.Address)).Error; err != nil {
+	if err := s.DB.First(&authAddress, "address = ?", strings.ToLower(params.Address)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return result, &HttpError{
 				Code:    http.StatusForbidden,
 				Reason:  ERR_USER_NOT_FOUND,
-				Details: "no such user exist",
+				Details: "No such user exist",
 			}
 		}
 	}
+
+	user.ID = authAddress.UserID
 
 	if err := s.DB.First(&nonce, "address = ?", strings.ToLower(params.Address)).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return result, &HttpError{
 				Code:    http.StatusForbidden,
 				Reason:  ERR_USER_NOT_FOUND,
-				Details: "no nonce messasge found, please generate nonce first.",
+				Details: "No nonce message found, please generate nonce first.",
 			}
 		}
 	}
@@ -453,7 +455,7 @@ func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLo
 		return result, &HttpError{
 			Code:    http.StatusForbidden,
 			Reason:  ERR_INVALID_AUTH,
-			Details: "nonce expired, please generate new nonce.",
+			Details: "Nonce expired, please generate new nonce.",
 		}
 	}
 
@@ -461,7 +463,7 @@ func (s Authorization) LoginWithMetamask(params MetamaskLoginParams) (MetamaskLo
 		return result, &HttpError{
 			Code:    http.StatusForbidden,
 			Reason:  ERR_INVALID_AUTH,
-			Details: "signature verification failed",
+			Details: "Signature verification failed",
 		}
 	}
 
@@ -494,7 +496,7 @@ func (s Authorization) RegisterWithMetamask(params RegisterWithMetamaskParams) (
 			return result, &HttpError{
 				Code:    http.StatusNotFound,
 				Reason:  ERR_INVALID_INVITE,
-				Details: "no such invite code was found",
+				Details: "No such invite code was found",
 			}
 		}
 	}
@@ -503,7 +505,7 @@ func (s Authorization) RegisterWithMetamask(params RegisterWithMetamaskParams) (
 		return result, &HttpError{
 			Code:    http.StatusBadRequest,
 			Reason:  ERR_INVITE_ALREADY_USED,
-			Details: "the invite code as already been claimed",
+			Details: "The invite code as already been claimed",
 		}
 	}
 
@@ -517,11 +519,27 @@ func (s Authorization) RegisterWithMetamask(params RegisterWithMetamaskParams) (
 		exist = nil
 	}
 
+	var authExist *AuthAddress
+	if err := s.DB.First(&authExist, "address = ?", username).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return result, err
+		}
+		authExist = nil
+	}
+
 	if exist != nil {
 		return result, &HttpError{
 			Code:    http.StatusBadRequest,
 			Reason:  ERR_USERNAME_TAKEN,
-			Details: "username already exist",
+			Details: "Address already exist",
+		}
+	}
+
+	if authExist != nil {
+		return result, &HttpError{
+			Code:    http.StatusBadRequest,
+			Reason:  ERR_USERNAME_TAKEN,
+			Details: "Address already linked to an account",
 		}
 	}
 
@@ -531,10 +549,24 @@ func (s Authorization) RegisterWithMetamask(params RegisterWithMetamaskParams) (
 		Perm:     PermLevelUser,
 	}
 
-	if err := s.DB.Create(newUser).Error; err != nil {
+	if err := s.DB.Create(&newUser).Error; err != nil {
 		return result, &HttpError{
-			Code:   http.StatusInternalServerError,
-			Reason: ERR_USER_CREATION_FAILED,
+			Code:    http.StatusInternalServerError,
+			Reason:  ERR_USER_CREATION_FAILED,
+			Details: err.Error(),
+		}
+	}
+
+	newAuthAddress := &AuthAddress{
+		UserID:  newUser.ID,
+		Address: username,
+	}
+
+	if err := s.DB.Create(newAuthAddress).Error; err != nil {
+		return result, &HttpError{
+			Code:    http.StatusInternalServerError,
+			Reason:  ERR_USER_CREATION_FAILED,
+			Details: err.Error(),
 		}
 	}
 
@@ -580,4 +612,96 @@ func (s Authorization) newAuthTokenForUser(user *User, expiry time.Time, perms [
 	}
 
 	return authToken, nil
+}
+
+type AuthAddressParams struct {
+	Address string `json:"address"`
+}
+
+type AuthAddressResult struct {
+	Success bool `json:"success"`
+}
+
+type AuthAddress struct {
+	gorm.Model
+	Address string
+	UserID  uint `gorm:"index"`
+}
+
+func (s Authorization) AddAuthAddress(params AuthAddressParams, u *User) (AuthAddressResult, error) {
+	var result AuthAddressResult
+	var authAddress AuthAddress
+
+	if err := s.DB.First(&authAddress, "address = ?", params.Address).Error; err == nil {
+		return result, &HttpError{
+			Code:    http.StatusNotFound,
+			Reason:  ERR_INVALID_REQUEST,
+			Details: "Address is already linked to a user",
+		}
+	}
+
+	authAddress.Address = params.Address
+	authAddress.UserID = u.ID
+
+	if err := s.DB.Create(&authAddress).Error; err != nil {
+		return result, &HttpError{
+			Code:    http.StatusNotFound,
+			Reason:  ERR_INTERNAL_ERROR,
+			Details: err.Error(),
+		}
+	}
+
+	return AuthAddressResult{
+		Success: true,
+	}, nil
+}
+
+func (s Authorization) RemoveAuthAddress(params AuthAddressParams, u *User) (AuthAddressResult, error) {
+	var result AuthAddressResult
+	var authAddress AuthAddress
+
+	if params.Address == u.Username {
+		return result, &HttpError{
+			Code:    http.StatusBadRequest,
+			Reason:  ERR_INVALID_REQUEST,
+			Details: "Can't remove main account address",
+		}
+	}
+
+	if err := s.DB.First(&authAddress, "address = ?", params.Address).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return result, &HttpError{
+				Code:    http.StatusBadRequest,
+				Reason:  ERR_INVALID_REQUEST,
+				Details: "Address not found",
+			}
+		}
+	}
+
+	authAddress.Address = params.Address
+	authAddress.UserID = u.ID
+
+	if err := s.DB.Delete(&authAddress).Error; err != nil {
+		return result, &HttpError{
+			Code:    http.StatusBadRequest,
+			Reason:  ERR_INTERNAL_ERROR,
+			Details: err.Error(),
+		}
+	}
+
+	return AuthAddressResult{
+		Success: true,
+	}, nil
+}
+
+func (s Authorization) GetAuthAddress(u *User) (AuthAddressParams, error) {
+	var authAddress AuthAddress
+
+	if err := s.DB.First(&authAddress, "user_id = ?", u.ID).Error; err != nil {
+		authAddress.Address = ""
+	}
+
+	return AuthAddressParams{
+		Address: authAddress.Address,
+	}, nil
 }
