@@ -1,12 +1,12 @@
 package main
 
 import (
+	"auth-svc/core"
 	httpServer "github.com/go-micro/plugins/v4/server/http"
 	"github.com/spf13/viper"
 	"go-micro.dev/v4"
 	"go-micro.dev/v4/registry"
 	"go-micro.dev/v4/server"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"log"
 	"time"
@@ -57,19 +57,9 @@ func main() {
 func initDB() *gorm.DB {
 	viper.SetConfigFile(".env")
 	err := viper.ReadInConfig()
+	dsn := viper.Get("DB_DSN").(string)
 
-	dbHost, okHost := viper.Get("DB_HOST").(string)
-	dbUser, okUser := viper.Get("DB_USER").(string)
-	dbPass, okPass := viper.Get("DB_PASS").(string)
-	dbName, okName := viper.Get("DB_NAME").(string)
-	dbPort, okPort := viper.Get("DB_PORT").(string)
-	if !okHost || !okUser || !okPass || !okName || !okPort {
-		panic("invalid database configuration")
-	}
-
-	dsn := "host=" + dbHost + " user=" + dbUser + " password=" + dbPass + " dbname=" + dbName + " port=" + dbPort + " sslmode=disable TimeZone=Asia/Shanghai"
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := core.OpenDatabase(dsn)
 	sqldb, err := db.DB()
 	if err != nil {
 		panic(err)

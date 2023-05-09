@@ -6,6 +6,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
 	"net/http"
+	"time"
 )
 
 var (
@@ -24,9 +25,16 @@ const (
 )
 
 func InitRouter(e *echo.Echo) {
-	e.POST("/check-api-key", BasicUserApiCheckHandler)
-	e.POST("/check-user-api-key", BasicApiUserCheckHandler)
-	e.POST("/check-user-pass", BasicUserPassHandler)
+
+	check := e.Group("/check")
+	check.POST("/api-key", BasicUserApiCheckHandler)
+	check.POST("/user-api-key", BasicApiUserCheckHandler)
+	check.POST("/user-pass", BasicUserPassHandler)
+
+	register := e.Group("/register")
+	register.GET("/new-user", BasicRegisterTokenHandler)
+	register.GET("/new-token/:userId", BasicRegisterTokenHandler)
+	register.GET("/new-exp-token/:userId", BasicRegisterExpiringUserHandler)
 
 	e.POST("/generate-nonce", GenerateNonceHandler)
 	e.POST("/login-with-metamask", LoginWithMetamaskHandler)
@@ -51,6 +59,34 @@ func withUser(f func(echo.Context, *core.User) error) func(echo.Context) error {
 		}
 		return f(c, u)
 	}
+}
+
+func BasicRegisterTokenHandler(c echo.Context) error {
+	result, _ := auth.NewUserAndAuthToken(c, 0)
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"token":   result.Token,
+		"expires": result.Expiry,
+	})
+
+}
+
+// BasicRegisterExpiringUserHandler // such as "300ms", "-1.5h" or "2h45m".
+// // Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
+func BasicRegisterExpiringUserHandler(c echo.Context) error {
+	duration := c.Param("duration")
+	fmt.Print(duration)
+	durationToParse, err := time.ParseDuration(duration)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"error": "invalid duration",
+		})
+	}
+	result, _ := auth.NewUserAndAuthToken(c, durationToParse)
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"token":   result.Token,
+		"expires": result.Expiry,
+	})
+
 }
 
 func GenerateNonceHandler(c echo.Context) error {

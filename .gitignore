@@ -16,3 +16,5 @@
 
 # don't commit the service binary to vcs
 auth-svc
+
+.env

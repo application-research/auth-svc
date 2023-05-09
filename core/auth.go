@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const TokenExpiryDurationPermanent = time.Hour * 24 * 365 * 100
+
 type AuthorizationServer struct {
 	// The authorization server's identifier.
 	Authorization
@@ -704,4 +706,53 @@ func (s Authorization) GetAuthAddress(u *User) (AuthAddressParams, error) {
 	return AuthAddressParams{
 		Address: authAddress.Address,
 	}, nil
+}
+
+func (s Authorization) NewUserAndAuthToken(c echo.Context, expDuration time.Duration) (*AuthToken, error) {
+
+	var user User
+	userId := c.Param("userId")
+	s.DB.Model(&user).Where("id = ?", userId).First(&user) // my default user
+
+	newUuid := uuid.New().String()
+
+	// just create with a default user
+	if user.ID == 0 {
+		user = User{
+			UUID:            newUuid,
+			Username:        "new-user",
+			Salt:            "",
+			PassHash:        "",
+			DID:             "",
+			UserEmail:       "",
+			AuthToken:       AuthToken{},
+			Perm:            0,
+			Flags:           0,
+			StorageDisabled: false,
+		}
+	}
+
+	var expiry time.Time
+	if expDuration == 0 {
+		expiry = time.Now().Add(TokenExpiryDurationPermanent)
+	} else {
+		expiry = time.Now().Add(expDuration)
+	}
+
+	token := "DEL" + uuid.New().String() + "TA"
+	fmt.Printf("Token: %s", token)
+	authToken := &AuthToken{
+		Token:      token,
+		TokenHash:  GetTokenHash(token),
+		Label:      "new api token",
+		User:       user.ID,
+		Expiry:     expiry,
+		UploadOnly: true,
+		IsSession:  true,
+	}
+	if err := s.DB.Create(authToken).Error; err != nil {
+		return nil, err
+	}
+
+	return authToken, nil
 }
