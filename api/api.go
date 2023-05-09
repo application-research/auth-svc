@@ -45,6 +45,12 @@ func InitRouter(e *echo.Echo) {
 	user.POST("/auth-address", withUser(AddAuthAddressHandler))
 	user.DELETE("/auth-address", withUser(RemoveAuthAddressHandler))
 	user.GET("/auth-address", withUser(GetAuthAddressHandler))
+
+	// health check
+	health := e.Group("/health")
+	ConfigureHealthCheckRouter(health)
+	// metrics
+	ConfigMetricsRouter(e.Group("/metrics"))
 }
 
 func withUser(f func(echo.Context, *core.User) error) func(echo.Context) error {
